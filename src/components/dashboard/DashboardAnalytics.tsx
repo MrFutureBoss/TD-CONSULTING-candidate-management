@@ -181,7 +181,7 @@ export default function DashboardAnalytics() {
       {recentCandidates.length > 0 && (
         <div className="mt-2">
           <div className="mb-2 text-xs uppercase text-gray-500">
-            Newest candidates in last 7 days
+            Top 5 newest candidates in last 7 days
           </div>
           <div className="overflow-x-auto rounded-lg border bg-white">
             <table className="min-w-full text-sm">

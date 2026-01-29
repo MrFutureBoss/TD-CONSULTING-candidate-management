@@ -195,7 +195,7 @@ export default function UploadResume({
             />
             <label
               htmlFor="resume-file"
-              className="cursor-pointer rounded-lg border-none bg-gray-300 px-2 py-1 text-sm hover:bg-gray-50 hover:border hover:border-dashed"
+              className="cursor-pointer rounded-lg px-2 py-1 text-xs bg-gray-50 border border-dashed text-gray-700 hover:opacity-80"
             >
               Choose file
             </label>
