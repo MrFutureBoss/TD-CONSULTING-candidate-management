@@ -37,13 +37,15 @@ export default function RegisterView() {
   }
 
   return (
-    <div className="p-4">
-      <h1 className="text-lg font-semibold">{session ? 'Already logged in' : 'Register to your account'}</h1>
-      {session ? (
-        <AlreadyLoginAlert session={session} error={error} loading={loading} onLogout={handleLogout} />
-      ) : (
-        <RegisterForm />
-      )}
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-6 shadow-md">
+        <h1 className="mb-4 text-lg font-semibold">{session ? 'Already logged in' : 'Register to your account'}</h1>
+        {session ? (
+          <AlreadyLoginAlert session={session} error={error} loading={loading} onLogout={handleLogout} />
+        ) : (
+          <RegisterForm />
+        )}
+      </div>
     </div>
   );
 }
