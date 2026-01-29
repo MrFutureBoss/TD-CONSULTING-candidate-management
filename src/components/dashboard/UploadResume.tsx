@@ -5,7 +5,6 @@ import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 
-//This function is used to handle the special characters in the file name
 function toSafeStorageFileName(originalName: string) {
   const lastDot = originalName.lastIndexOf('.');
   const base = lastDot > 0 ? originalName.slice(0, lastDot) : originalName;

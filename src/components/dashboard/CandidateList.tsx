@@ -3,6 +3,8 @@ import Swal from 'sweetalert2';
 import type { Candidate, CandidateStatus } from '../../types/candidateType';
 import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 
+const PAGE_SIZE = 5;
+
 interface FilterState {
   search: string;
   status: CandidateStatus | '';
@@ -15,6 +17,9 @@ export default function CandidateList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filters, setFilters] = useState<FilterState>({
     search: '',
     status: '',
@@ -22,7 +27,7 @@ export default function CandidateList() {
     date_to: '',
   });
 
-  async function load(showSpinner: boolean, useFilters = false) {
+  async function load(showSpinner: boolean, useFilters = false, cursor?: string | null) {
     if (showSpinner) {
       setLoading(true);
     }
@@ -53,20 +58,35 @@ export default function CandidateList() {
           status: filters.status || undefined,
           date_from: filters.date_from || undefined,
           date_to: filters.date_to || undefined,
+          limit: PAGE_SIZE,
+          cursor: cursor || undefined,
         },
       });
 
       if (error || (data && (data as any).error)) {
         const errMsg = (data as any)?.error ?? error?.message ?? 'Unknown error';
         setError(errMsg);
-        setRows([]);
+        if (!cursor) {
+          setRows([]);
+        }
         if (showSpinner) {
           setLoading(false);
         }
         return;
       }
 
-      setRows((data?.data ?? []) as Candidate[]);
+      if (cursor) {
+        const existingIds = new Set(rows.map((r) => r.id));
+        const newItems = ((data?.data ?? []) as Candidate[]).filter(
+          (item) => !existingIds.has(item.id)
+        );
+        setRows((prev) => [...prev, ...newItems]);
+      } else {
+        setRows((data?.data ?? []) as Candidate[]);
+      }
+
+      setHasMore((data as any)?.hasMore ?? false);
+      setNextCursor((data as any)?.nextCursor ?? null);
       if (showSpinner) {
         setLoading(false);
       }
@@ -77,7 +97,8 @@ export default function CandidateList() {
       .from('candidates')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE + 1);
 
     if (error) {
       setError(error.message);
@@ -88,10 +109,70 @@ export default function CandidateList() {
       return;
     }
 
-    setRows((data ?? []) as Candidate[]);
+    const items = (data ?? []) as Candidate[];
+    const more = items.length > PAGE_SIZE;
+    const pageItems = more ? items.slice(0, PAGE_SIZE) : items;
+
+    setRows(pageItems);
+    setHasMore(more);
+    setNextCursor(more ? pageItems[pageItems.length - 1].created_at : null);
     if (showSpinner) {
       setLoading(false);
     }
+  }
+
+  async function loadMore() {
+    if (!hasMore || loadingMore || !nextCursor) return;
+
+    setLoadingMore(true);
+    setError(null);
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setLoadingMore(false);
+      await Swal.fire({
+        icon: 'error',
+        title: 'Please login first',
+      });
+      return;
+    }
+
+    const hasFilters = !!(filters.search || filters.status || filters.date_from || filters.date_to);
+
+    if (hasFilters) {
+      await load(false, true, nextCursor);
+      setLoadingMore(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('candidates')
+      .select('*')
+      .eq('user_id', user.id)
+      .lt('created_at', nextCursor)
+      .order('created_at', { ascending: false })
+      .limit(PAGE_SIZE + 1);
+
+    if (error) {
+      setError(error.message);
+      setLoadingMore(false);
+      return;
+    }
+
+    const existingIds = new Set(rows.map((r) => r.id));
+    const items = (data ?? []) as Candidate[];
+    const more = items.length > PAGE_SIZE;
+    const pageItems = more ? items.slice(0, PAGE_SIZE) : items;
+    const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+
+    setRows((prev) => [...prev, ...newItems]);
+    setHasMore(more);
+    setNextCursor(more ? pageItems[pageItems.length - 1].created_at : null);
+    setLoadingMore(false);
   }
 
   function handleFilterChange(key: keyof FilterState, value: string) {
@@ -118,7 +199,6 @@ export default function CandidateList() {
       const session = data.session ?? null;
       const userId = session?.user?.id ?? null;
 
-      // Ensure realtime uses the latest auth token (if available)
       const realtimeAny = (supabase as any).realtime;
       if (realtimeAny?.setAuth) {
         realtimeAny.setAuth(session?.access_token ?? '');
@@ -159,7 +239,6 @@ export default function CandidateList() {
           channel = null;
         }
 
-        // Reload list for new auth state and recreate channel if logged in
         void load(false);
 
         const userId = session?.user?.id ?? null;
@@ -313,7 +392,9 @@ export default function CandidateList() {
 
   useEffect(() => {
     const hasFilters = !!(filters.search || filters.status || filters.date_from || filters.date_to);
-    void load(false, hasFilters);
+    setNextCursor(null);
+    setHasMore(false);
+    void load(true, hasFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.search, filters.status, filters.date_from, filters.date_to]);
 
@@ -464,6 +545,19 @@ export default function CandidateList() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && hasMore && (
+        <div className="mt-3">
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={loadMore}
+            className="rounded border bg-white px-3 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+          >
+            {loadingMore ? 'Loading more...' : 'Load more'}
+          </button>
         </div>
       )}
     </div>

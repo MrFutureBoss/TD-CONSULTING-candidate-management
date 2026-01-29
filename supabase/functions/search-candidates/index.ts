@@ -12,7 +12,7 @@ interface RequestBody {
   date_from?: string;
   date_to?: string;
   limit?: number;
-  offset?: number;
+  cursor?: string;
 }
 
 function calculateRelevanceScore(candidate: any, searchTerm: string): number {
@@ -80,7 +80,7 @@ serve(async (req) => {
     date_from,
     date_to,
     limit = 100,
-    offset = 0,
+    cursor,
   } = body;
 
   if (!userId) {
@@ -104,12 +104,64 @@ serve(async (req) => {
   }
 
   if (date_from) {
-    query = query.gte('created_at', date_from);
+    const fromDate = new Date(date_from);
+    fromDate.setHours(0, 0, 0, 0);
+    query = query.gte('created_at', fromDate.toISOString());
   }
 
   if (date_to) {
-    query = query.lte('created_at', date_to);
+    const toDate = new Date(date_to);
+    toDate.setHours(23, 59, 59, 999);
+    query = query.lte('created_at', toDate.toISOString());
   }
+
+  if (search) {
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error searching candidates:', error);
+      return new Response(
+        JSON.stringify({
+          data: null,
+          error: 'Failed to search candidates',
+          details: error.message,
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
+    let results = (data || [])
+      .map((candidate: any) => ({
+        ...candidate,
+        relevance: calculateRelevanceScore(candidate, search),
+      }))
+      .filter((candidate: any) => candidate.relevance > 0)
+      .sort((a: any, b: any) => b.relevance - a.relevance);
+
+    const startIndex = cursor ? results.findIndex((c: any) => c.created_at < cursor) : 0;
+    const endIndex = startIndex + limit;
+    const pageItems = results.slice(startIndex, endIndex);
+    const hasMore = endIndex < results.length;
+    const nextCursor = hasMore && pageItems.length > 0 
+      ? pageItems[pageItems.length - 1].created_at 
+      : null;
+
+    return new Response(
+      JSON.stringify({
+        data: pageItems,
+        hasMore,
+        nextCursor,
+        error: null,
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
+  }
+
+  if (cursor) {
+    query = query.lt('created_at', cursor);
+  }
+
+  query = query.order('created_at', { ascending: false }).limit(limit + 1);
 
   const { data, error } = await query;
 
@@ -125,33 +177,18 @@ serve(async (req) => {
     );
   }
 
-  let results = (data || []) as any[];
-
-  if (search) {
-    results = results
-      .map((candidate) => ({
-        ...candidate,
-        relevance: calculateRelevanceScore(candidate, search),
-      }))
-      .filter((candidate) => candidate.relevance > 0)
-      .sort((a, b) => b.relevance - a.relevance);
-  } else {
-    results.sort((a, b) => {
-      const aDate = new Date(a.created_at).getTime();
-      const bDate = new Date(b.created_at).getTime();
-      return bDate - aDate;
-    });
-  }
-
-  const total = results.length;
-  const paginatedResults = results.slice(offset, offset + limit);
+  const results = (data || []) as any[];
+  const hasMore = results.length > limit;
+  const pageItems = hasMore ? results.slice(0, limit) : results;
+  const nextCursor = hasMore && pageItems.length > 0 
+    ? pageItems[pageItems.length - 1].created_at 
+    : null;
 
   return new Response(
     JSON.stringify({
-      data: paginatedResults,
-      total,
-      limit,
-      offset,
+      data: pageItems,
+      hasMore,
+      nextCursor,
       error: null,
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
