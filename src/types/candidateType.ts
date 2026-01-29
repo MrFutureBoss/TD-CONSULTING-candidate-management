@@ -1,5 +1,10 @@
 export type CandidateStatus = 'New' | 'Interviewing' | 'Hired';
 
+export const ALLOWED_CANDIDATE_STATUS: CandidateStatus[] = [
+  'New',
+  'Interviewing',
+  'Hired',
+];
 export interface Candidate {
     id: string; 
     user_id: string; 

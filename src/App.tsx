@@ -10,11 +10,11 @@ function App() {
 
   return (
     <HomeLayout>
-      <Routes>
-        <Route path="/" element={<DashboardView />} />
+    <Routes>
+    <Route path="/" element={<DashboardView />} />
         <Route path="/login" element={<LoginView/>} />
         <Route path="/register" element={<RegisterView/>} />
-      </Routes>
+  </Routes>
     </HomeLayout>
   )
 }

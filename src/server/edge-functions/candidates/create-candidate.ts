@@ -1,7 +1,7 @@
 import supabase from '../../supabaseClient';
 import type { Candidate, CandidateStatus, CreateCandidateInput, CreateCandidateResult } from '../../../types/candidateType';
 
-  export const ALLOWED_CANDIDATE_STATUS: CandidateStatus[] = [
+ const ALLOWED_CANDIDATE_STATUS: CandidateStatus[] = [
     'New',
     'Interviewing',
     'Hired',

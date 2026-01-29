@@ -1,111 +1,179 @@
 import { useEffect, useState } from 'react';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import Swal from 'sweetalert2';
+import type { Candidate, CandidateStatus } from '../../types/candidateType';
+import { updateCandidateForUser } from '../../server/edge-functions/candidates/update-candidate';
+import { deleteCandidateForUser } from '../../server/edge-functions/candidates/deleteCandidate';
 import { supabase } from '../../server/supabaseClient';
-import type { Candidate } from '../../types/candidateType';
 
 export default function CandidateList() {
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [rows, setRows] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
-    async function init() {
+  async function load(showSpinner: boolean) {
+    if (showSpinner) {
       setLoading(true);
-      setError(null);
+    }
+    setError(null);
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-      if (!isMounted) return;
-
-      if (userError || !user) {
-        setUserId(null);
-        setCandidates([]);
-        setError('Please login to see your candidates.');
+    if (userError || !user) {
+      setRows([]);
+      if (showSpinner) {
         setLoading(false);
-        return;
       }
-
-      setUserId(user.id);
-
-      const { data, error } = await supabase
-        .from('candidates')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (!isMounted) return;
-
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-
-      setCandidates((data ?? []) as Candidate[]);
-      setLoading(false);
-
-      channel = supabase
-        .channel(`candidates-by-user-${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'candidates',
-            filter: `user_id=eq.${user.id}`,
-          },
-          (payload: RealtimePostgresChangesPayload<Candidate>) => {
-            setCandidates((prev) => {
-              const current = [...prev];
-
-              if (payload.eventType === 'INSERT' && payload.new) {
-                const next = [payload.new as Candidate, ...current];
-                return next;
-              }
-
-              if (payload.eventType === 'UPDATE' && payload.new) {
-                return current.map((c) =>
-                  c.id === (payload.new as Candidate).id
-                    ? (payload.new as Candidate)
-                    : c,
-                );
-              }
-
-              if (payload.eventType === 'DELETE' && payload.old) {
-                return current.filter(
-                  (c) => c.id !== (payload.old as Candidate).id,
-                );
-              }
-
-              return current;
-            });
-          },
-        )
-        .subscribe();
+      setError('Please login to see your candidates.');
+      return;
     }
 
-    void init();
+    const { data, error } = await supabase
+      .from('candidates')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    return () => {
-      isMounted = false;
-      if (channel) {
-        void supabase.removeChannel(channel);
+    if (error) {
+      setError(error.message);
+      setRows([]);
+      if (showSpinner) {
+        setLoading(false);
       }
-    };
-  }, []);
+      return;
+    }
 
-  if (loading) {
-    return <p className="mt-6 text-sm text-gray-600">Loading candidates...</p>;
+    setRows((data ?? []) as Candidate[]);
+    if (showSpinner) {
+      setLoading(false);
+    }
   }
 
-  if (error && !userId) {
+  useEffect(() => {
+    void load(true);
+
+    const channel = supabase
+      .channel('realtime-candidates')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'candidates' },
+        () => {
+          void load(false);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleDelete(candidate: Candidate) {
+    const confirm = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete candidate?',
+      text: 'This action cannot be undone.',
+      showCancelButton: true,
+      confirmButtonText: 'Delete',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Please login first',
+      });
+      return;
+    }
+
+    setActionLoadingId(candidate.id);
+    const res = await deleteCandidateForUser(user.id, candidate.id);
+    setActionLoadingId(null);
+
+    if (res.error) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Delete failed',
+        text: res.error,
+      });
+      return;
+    }
+
+    await Swal.fire({
+      icon: 'success',
+      title: 'Deleted',
+      timer: 800,
+      showConfirmButton: false,
+    });
+  }
+
+  async function handleUpdateStatus(candidate: Candidate) {
+    const currentStatus: CandidateStatus = (candidate.status as CandidateStatus) ?? 'New';
+
+    const { value: nextStatus, isConfirmed } = await Swal.fire<
+      CandidateStatus | null
+    >({
+      title: 'Update status',
+      input: 'select',
+      inputValue: currentStatus,
+      inputOptions: {
+        New: 'New',
+        Interviewing: 'Interviewing',
+        Hired: 'Hired',
+      },
+      showCancelButton: true,
+      confirmButtonText: 'Update',
+    });
+
+    if (!isConfirmed || !nextStatus || nextStatus === currentStatus) return;
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Please login first',
+      });
+      return;
+    }
+
+    setActionLoadingId(candidate.id);
+    const res = await updateCandidateForUser(user.id, candidate.id, {
+      status: nextStatus,
+    });
+    setActionLoadingId(null);
+
+    if (res.error) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Update failed',
+        text: res.details?.join('\n') ?? res.error,
+      });
+      return;
+    }
+
+    await Swal.fire({
+      icon: 'success',
+      title: 'Status updated',
+      timer: 800,
+      showConfirmButton: false,
+    });
+  }
+
+  if (error) {
     return (
       <p className="mt-6 text-sm text-red-600">
         {error}
@@ -117,7 +185,9 @@ export default function CandidateList() {
     <div className="mt-6">
       <h2 className="mb-3 text-base font-semibold">Table of candidates</h2>
 
-      {candidates.length === 0 ? (
+      {loading && rows.length === 0 ? (
+        <p className="text-sm text-gray-600">Loading candidates...</p>
+      ) : rows.length === 0 ? (
         <p className="text-sm text-gray-600">
           No candidates yet. Upload a resume to create one.
         </p>
@@ -132,10 +202,11 @@ export default function CandidateList() {
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Created at</th>
                 <th className="px-3 py-2 text-left">Resume</th>
+                <th className="px-3 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {candidates.map((c, index) => (
+              {rows.map((c, index) => (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 text-xs text-gray-500">
                     {index + 1}
@@ -167,6 +238,24 @@ export default function CandidateList() {
                     ) : (
                       <span className="text-gray-400 text-xs">No file</span>
                     )}
+                  </td>
+                  <td className="px-3 py-2 space-x-2 text-xs">
+                    <button
+                      type="button"
+                      className="rounded border bg-white px-2 py-1"
+                      disabled={actionLoadingId === c.id}
+                      onClick={() => handleUpdateStatus(c)}
+                    >
+                      {actionLoadingId === c.id ? 'Saving...' : 'Update'}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border bg-red-50 px-2 py-1 text-red-600"
+                      disabled={actionLoadingId === c.id}
+                      onClick={() => handleDelete(c)}
+                    >
+                      {actionLoadingId === c.id ? 'Deleting...' : 'Delete'}
+                    </button>
                   </td>
                 </tr>
               ))}
