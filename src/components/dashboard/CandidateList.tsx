@@ -3,13 +3,22 @@ import Swal from 'sweetalert2';
 import type { Candidate, CandidateStatus } from '../../types/candidateType';
 import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 
+interface FilterState {
+  search: string;
+  status: CandidateStatus | '';
+}
+
 export default function CandidateList() {
   const [rows, setRows] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<FilterState>({
+    search: '',
+    status: '',
+  });
 
-  async function load(showSpinner: boolean) {
+  async function load(showSpinner: boolean, useFilters = false) {
     if (showSpinner) {
       setLoading(true);
     }
@@ -26,6 +35,35 @@ export default function CandidateList() {
         setLoading(false);
       }
       setError('Please login to see your candidates.');
+      return;
+    }
+
+    if (useFilters && (filters.search || filters.status)) {
+      const { data, error } = await supabase.functions.invoke('search-candidates', {
+        headers: {
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: {
+          userId: user.id,
+          search: filters.search || undefined,
+          status: filters.status || undefined,
+        },
+      });
+
+      if (error || (data && (data as any).error)) {
+        const errMsg = (data as any)?.error ?? error?.message ?? 'Unknown error';
+        setError(errMsg);
+        setRows([]);
+        if (showSpinner) {
+          setLoading(false);
+        }
+        return;
+      }
+
+      setRows((data?.data ?? []) as Candidate[]);
+      if (showSpinner) {
+        setLoading(false);
+      }
       return;
     }
 
@@ -48,6 +86,17 @@ export default function CandidateList() {
     if (showSpinner) {
       setLoading(false);
     }
+  }
+
+  function handleFilterChange(key: keyof FilterState, value: string) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleResetFilters() {
+    setFilters({
+      search: '',
+      status: '',
+    });
   }
 
   useEffect(() => {
@@ -254,6 +303,12 @@ export default function CandidateList() {
       void load(false);
   }
 
+  useEffect(() => {
+    const hasFilters = !!(filters.search || filters.status);
+    void load(false, hasFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search, filters.status]);
+
   if (error) {
     return (
       <p className="mt-6 text-sm text-red-600">
@@ -266,11 +321,50 @@ export default function CandidateList() {
     <div className="mt-6">
       <h2 className="mb-3 text-base font-semibold">Table of candidates</h2>
 
+      <div className="mb-4 rounded-lg border bg-white p-4">
+        <div className="mb-3 text-sm font-semibold">Filter & Search</div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-xs text-gray-700">Search (Full-text)</label>
+            <input
+              type="text"
+              placeholder="Search name, position..."
+              value={filters.search}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="filter-status" className="mb-1 block text-xs text-gray-700">Status</label>
+            <select
+              id="filter-status"
+              value={filters.status}
+              onChange={(e) => handleFilterChange('status', e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm"
+            >
+              <option value="">All</option>
+              <option value="New">New</option>
+              <option value="Interviewing">Interviewing</option>
+              <option value="Hired">Hired</option>
+            </select>
+          </div>
+        </div>
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={handleResetFilters}
+            className="rounded border bg-gray-100 px-3 py-1 text-sm hover:bg-gray-200"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
       {loading && rows.length === 0 ? (
         <p className="text-sm text-gray-600">Loading candidates...</p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-gray-600">
-          No candidates yet. Upload a resume to create one.
+          No candidates found. {filters.search || filters.status ? 'Try adjusting your filters.' : 'Upload a resume to create one.'}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-white">
