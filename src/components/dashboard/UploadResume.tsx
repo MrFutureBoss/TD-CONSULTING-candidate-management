@@ -7,6 +7,28 @@ import type { CandidateStatus } from '../../types/candidateType';
 
 const STATUS_OPTIONS: CandidateStatus[] = ['New', 'Interviewing', 'Hired'];
 
+const MAX_RESUME_BYTES = 10 * 1024 * 1024;
+
+//This function is used to handle the special characters in the file name
+function toSafeStorageFileName(originalName: string) {
+  const lastDot = originalName.lastIndexOf('.');
+  const base = lastDot > 0 ? originalName.slice(0, lastDot) : originalName;
+  const ext = lastDot > 0 ? originalName.slice(lastDot).toLowerCase() : '.pdf';
+
+  const noDiacritics = base
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const safeBase = noDiacritics
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  const finalExt = ext === '.pdf' ? '.pdf' : '.pdf';
+  return `${safeBase || 'resume'}${finalExt}`;
+}
+
 export default function UploadResume({
   onCreated,
 }: {
@@ -38,8 +60,20 @@ export default function UploadResume({
         return;
       }
 
-      const safeName = file.name.replaceAll(' ', '_');
-      const path = `${Date.now()}-${safeName}`;
+      const isPdfByName = file.name.toLowerCase().endsWith('.pdf');
+      const isPdfByType = !file.type || file.type === 'application/pdf';
+      if (!isPdfByName || !isPdfByType) {
+        await Swal.fire({ icon: 'error', title: 'PDF only' });
+        return;
+      }
+
+      if (file.size > MAX_RESUME_BYTES) {
+        await Swal.fire({ icon: 'error', title: 'File too large (max 10MB)' });
+        return;
+      }
+
+      const safeName = toSafeStorageFileName(file.name);
+      const path = `${user.id}/${Date.now()}-${safeName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('resumes')
@@ -143,8 +177,31 @@ export default function UploadResume({
               className="sr-only"
               type="file"
               accept=".pdf"
-              maxLength={10 * 1024 * 1024}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const next = e.currentTarget.files?.[0] ?? null;
+                if (!next) {
+                  setFile(null);
+                  return;
+                }
+
+                const isPdfByName = next.name.toLowerCase().endsWith('.pdf');
+                const isPdfByType = !next.type || next.type === 'application/pdf';
+                if (!isPdfByName || !isPdfByType) {
+                  e.currentTarget.value = '';
+                  setFile(null);
+                  void Swal.fire({ icon: 'error', title: 'PDF only' });
+                  return;
+                }
+
+                if (next.size > MAX_RESUME_BYTES) {
+                  e.currentTarget.value = '';
+                  setFile(null);
+                  void Swal.fire({ icon: 'error', title: 'File too large (max 10MB)' });
+                  return;
+                }
+
+                setFile(next);
+              }}
               required
             />
             <label
