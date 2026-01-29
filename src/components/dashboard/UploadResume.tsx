@@ -1,8 +1,7 @@
 import type { FormEventHandler } from 'react';
 import { useState } from 'react';
 import Swal from 'sweetalert2';
-import { supabase } from '../../server/supabaseClient';
-import { createCandidateForUser } from '../../server/edge-functions/candidates/create-candidate';
+import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 
@@ -93,18 +92,29 @@ export default function UploadResume({
 
       const resumeUrl = publicData.publicUrl;
 
-      const result = await createCandidateForUser(user.id, {
-        full_name: fullName,
-        applied_position: appliedPosition,
-        status: 'New',
-        resume_url: resumeUrl,
+      const { data, error } = await supabase.functions.invoke('create-candidate', {
+        headers: {
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: {
+          user_id: user.id,
+          full_name: fullName,
+          applied_position: appliedPosition,
+          status: 'New' as const,
+          resume_url: resumeUrl,
+        },
       });
 
-      if (result.error) {
+      if (error || (data && (data as any).error)) {
+        const errMsg =
+          (data as any)?.details?.join('\n') ??
+          (data as any)?.error ??
+          error?.message ??
+          'Unknown error';
         await Swal.fire({
           icon: 'error',
           title: 'Create candidate failed',
-          text: result.details?.join('\n') ?? result.error,
+          text: errMsg,
         });
         return;
       }

@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import Swal from 'sweetalert2';
 import type { Candidate, CandidateStatus } from '../../types/candidateType';
-import { updateCandidateForUser } from '../../server/edge-functions/candidates/update-candidate';
-import { deleteCandidateForUser } from '../../server/edge-functions/candidates/deleteCandidate';
-import { supabase } from '../../server/supabaseClient';
+import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 
 export default function CandidateList() {
   const [rows, setRows] = useState<Candidate[]>([]);
@@ -34,6 +32,7 @@ export default function CandidateList() {
     const { data, error } = await supabase
       .from('candidates')
       .select('*')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -52,21 +51,87 @@ export default function CandidateList() {
   }
 
   useEffect(() => {
-    void load(true);
+    let isMounted = true;
+    let channel: any = null;
 
-    const channel = supabase
-      .channel('realtime-candidates')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'candidates' },
-        () => {
-          void load(false);
-        },
-      )
-      .subscribe();
+    async function setupRealtime() {
+      await load(true);
+
+      const { data } = await supabase.auth.getSession();
+      const session = data.session ?? null;
+      const userId = session?.user?.id ?? null;
+
+      // Ensure realtime uses the latest auth token (if available)
+      const realtimeAny = (supabase as any).realtime;
+      if (realtimeAny?.setAuth) {
+        realtimeAny.setAuth(session?.access_token ?? '');
+      }
+
+      if (!userId) return;
+
+      channel = supabase
+        .channel(`realtime-candidates-${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'candidates',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            void load(false);
+          },
+        )
+        .subscribe();
+    }
+
+    void setupRealtime();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!isMounted) return;
+
+        const realtimeAny = (supabase as any).realtime;
+        if (realtimeAny?.setAuth) {
+          realtimeAny.setAuth(session?.access_token ?? '');
+        }
+
+        if (channel) {
+          await supabase.removeChannel(channel);
+          channel = null;
+        }
+
+        // Reload list for new auth state and recreate channel if logged in
+        void load(false);
+
+        const userId = session?.user?.id ?? null;
+        if (!userId) return;
+
+        channel = supabase
+          .channel(`realtime-candidates-${userId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'candidates',
+              filter: `user_id=eq.${userId}`,
+            },
+            () => {
+              void load(false);
+            },
+          )
+          .subscribe();
+      },
+    );
 
     return () => {
-      void supabase.removeChannel(channel);
+      isMounted = false;
+      if (channel) {
+        void supabase.removeChannel(channel);
+      }
+      authListener?.subscription.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -97,14 +162,20 @@ export default function CandidateList() {
     }
 
     setActionLoadingId(candidate.id);
-    const res = await deleteCandidateForUser(user.id, candidate.id);
+    const { data, error } = await supabase.functions.invoke('delete-candidate', {
+      headers: {
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: { candidateId: candidate.id, userId: user.id },
+    });
     setActionLoadingId(null);
 
-    if (res.error) {
+    const edgeError = (data as any)?.error ?? error?.message ?? null;
+    if (edgeError) {
       await Swal.fire({
         icon: 'error',
         title: 'Delete failed',
-        text: res.error,
+        text: edgeError,
       });
       return;
     }
@@ -115,6 +186,7 @@ export default function CandidateList() {
       timer: 800,
       showConfirmButton: false,
     });
+      void load(false);
   }
 
   async function handleUpdateStatus(candidate: Candidate) {
@@ -151,16 +223,24 @@ export default function CandidateList() {
     }
 
     setActionLoadingId(candidate.id);
-    const res = await updateCandidateForUser(user.id, candidate.id, {
-      status: nextStatus,
+    const { data, error } = await supabase.functions.invoke('update-candidate', {
+      headers: {
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: {
+        candidateId: candidate.id,
+        status: nextStatus,
+        userId: user.id,
+      },
     });
     setActionLoadingId(null);
 
-    if (res.error) {
+    const edgeError = (data as any)?.error ?? error?.message ?? null;
+    if (edgeError) {
       await Swal.fire({
         icon: 'error',
         title: 'Update failed',
-        text: res.details?.join('\n') ?? res.error,
+        text: (data as any)?.details?.join('\n') ?? edgeError,
       });
       return;
     }
@@ -171,6 +251,7 @@ export default function CandidateList() {
       timer: 800,
       showConfirmButton: false,
     });
+      void load(false);
   }
 
   if (error) {
