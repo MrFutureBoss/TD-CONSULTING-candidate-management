@@ -9,6 +9,8 @@ interface RequestBody {
   userId?: string;
   search?: string;
   status?: CandidateStatus | CandidateStatus[];
+  date_from?: string;
+  date_to?: string;
   limit?: number;
   offset?: number;
 }
@@ -75,6 +77,8 @@ serve(async (req) => {
     userId,
     search,
     status,
+    date_from,
+    date_to,
     limit = 100,
     offset = 0,
   } = body;
@@ -97,6 +101,14 @@ serve(async (req) => {
     } else {
       query = query.eq('status', status);
     }
+  }
+
+  if (date_from) {
+    query = query.gte('created_at', date_from);
+  }
+
+  if (date_to) {
+    query = query.lte('created_at', date_to);
   }
 
   const { data, error } = await query;

@@ -6,6 +6,8 @@ import { supabase, SUPABASE_ANON_KEY } from '../../server/supabaseClient';
 interface FilterState {
   search: string;
   status: CandidateStatus | '';
+  date_from: string;
+  date_to: string;
 }
 
 export default function CandidateList() {
@@ -16,6 +18,8 @@ export default function CandidateList() {
   const [filters, setFilters] = useState<FilterState>({
     search: '',
     status: '',
+    date_from: '',
+    date_to: '',
   });
 
   async function load(showSpinner: boolean, useFilters = false) {
@@ -38,7 +42,7 @@ export default function CandidateList() {
       return;
     }
 
-    if (useFilters && (filters.search || filters.status)) {
+    if (useFilters && (filters.search || filters.status || filters.date_from || filters.date_to)) {
       const { data, error } = await supabase.functions.invoke('search-candidates', {
         headers: {
           Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
@@ -47,6 +51,8 @@ export default function CandidateList() {
           userId: user.id,
           search: filters.search || undefined,
           status: filters.status || undefined,
+          date_from: filters.date_from || undefined,
+          date_to: filters.date_to || undefined,
         },
       });
 
@@ -96,6 +102,8 @@ export default function CandidateList() {
     setFilters({
       search: '',
       status: '',
+      date_from: '',
+      date_to: '',
     });
   }
 
@@ -304,10 +312,10 @@ export default function CandidateList() {
   }
 
   useEffect(() => {
-    const hasFilters = !!(filters.search || filters.status);
+    const hasFilters = !!(filters.search || filters.status || filters.date_from || filters.date_to);
     void load(false, hasFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.search, filters.status]);
+  }, [filters.search, filters.status, filters.date_from, filters.date_to]);
 
   if (error) {
     return (
@@ -348,6 +356,26 @@ export default function CandidateList() {
               <option value="Hired">Hired</option>
             </select>
           </div>
+          <div>
+            <label htmlFor="filter-date-from" className="mb-1 block text-xs text-gray-700">Date From</label>
+            <input
+              id="filter-date-from"
+              type="date"
+              value={filters.date_from}
+              onChange={(e) => handleFilterChange('date_from', e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="filter-date-to" className="mb-1 block text-xs text-gray-700">Date To</label>
+            <input
+              id="filter-date-to"
+              type="date"
+              value={filters.date_to}
+              onChange={(e) => handleFilterChange('date_to', e.target.value)}
+              className="w-full rounded border px-2 py-1 text-sm"
+            />
+          </div>
         </div>
         <div className="mt-3">
           <button
@@ -364,7 +392,7 @@ export default function CandidateList() {
         <p className="text-sm text-gray-600">Loading candidates...</p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-gray-600">
-          No candidates found. {filters.search || filters.status ? 'Try adjusting your filters.' : 'Upload a resume to create one.'}
+          No candidates found. {filters.search || filters.status || filters.date_from || filters.date_to ? 'Try adjusting your filters.' : 'Upload a resume to create one.'}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-white">
