@@ -10,3 +10,15 @@ export interface Candidate {
     created_at: string; 
   }
   
+  export interface CreateCandidateInput {
+    full_name?: string;
+    applied_position?: string;
+    status?: CandidateStatus;
+    resume_url?: string;
+  }
+  
+  export interface CreateCandidateResult {
+    data: Candidate | null;
+    error: string | null;
+    details?: string[];
+  }
