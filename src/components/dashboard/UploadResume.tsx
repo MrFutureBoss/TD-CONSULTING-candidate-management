@@ -3,9 +3,6 @@ import { useState } from 'react';
 import Swal from 'sweetalert2';
 import { supabase } from '../../server/supabaseClient';
 import { createCandidateForUser } from '../../server/edge-functions/candidates/create-candidate';
-import type { CandidateStatus } from '../../types/candidateType';
-
-const STATUS_OPTIONS: CandidateStatus[] = ['New', 'Interviewing', 'Hired'];
 
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 
@@ -36,7 +33,6 @@ export default function UploadResume({
 }) {
   const [fullName, setFullName] = useState('');
   const [appliedPosition, setAppliedPosition] = useState('');
-  const [status, setStatus] = useState<CandidateStatus>('New');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -100,7 +96,7 @@ export default function UploadResume({
       const result = await createCandidateForUser(user.id, {
         full_name: fullName,
         applied_position: appliedPosition,
-        status,
+        status: 'New',
         resume_url: resumeUrl,
       });
 
@@ -122,7 +118,6 @@ export default function UploadResume({
 
       setFullName('');
       setAppliedPosition('');
-      setStatus('New');
       setFile(null);
       onCreated?.();
     } finally {
@@ -152,21 +147,6 @@ export default function UploadResume({
             onChange={(e) => setAppliedPosition(e.target.value)}
             required
           />
-        </label>
-
-        <label className="grid gap-1 text-sm">
-          <span className="text-gray-700">Status</span>
-          <select
-            className="rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/20"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as CandidateStatus)}
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
         </label>
 
         <label className="grid gap-1 text-sm">
